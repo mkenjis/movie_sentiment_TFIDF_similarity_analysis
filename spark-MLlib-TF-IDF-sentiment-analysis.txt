@@ -1,12 +1,8 @@
 
 val rdd = sc.textFile("imdb_labelled.txt").map(x => x.split("\\t"))
 
-val sets = rdd.randomSplit(Array(0.8,0.2))
-val trainSet = sets(0)
-val testSet = sets(1)
-
 -- remove nonword characters (such as punctuation).
-val nonWordSplit = trainSet.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
+val nonWordSplit = rdd.flatMap(x => x(0).split("""\W+""").map(_.toLowerCase))
 nonWordSplit.sample(true, 0.3, 42).take(100).mkString(",")
 nonWordSplit.distinct.count
 
@@ -43,7 +39,7 @@ val tokenCountsFilteredAll = tokenCountsFilteredSize.filter { case (k, v) => !ra
 tokenCountsFilteredAll.top(20)(orderingAsc).mkString("\n")
 
 tokenCountsFilteredAll.count
-res24: Long = 967
+res24: Long = 1161
 
 def tokenize(line: String): Seq[String] = {
  line.split("""\W+""")
@@ -55,8 +51,12 @@ def tokenize(line: String): Seq[String] = {
  .toSeq
 }
 
-trainSet.flatMap(x => tokenize(x(0))).distinct.count
-res27: Long = 967
+rdd.flatMap(x => tokenize(x(0))).distinct.count
+res27: Long = 1161
+
+val sets = rdd.randomSplit(Array(0.8,0.2))
+val trainSet = sets(0)
+val testSet = sets(1)
 
 val tokens = trainSet.map(x => tokenize(x(0)))
 tokens.first.take(20)
@@ -67,7 +67,7 @@ import org.apache.spark.mllib.linalg.{ SparseVector => SV }
 import org.apache.spark.mllib.feature.HashingTF
 import org.apache.spark.mllib.feature.IDF
 
-val dim = math.pow(2, 10).toInt
+val dim = math.pow(2, 11).toInt
 val hashingTF = new HashingTF(dim)
 
 -- transform function of HashingTF maps each input document (that is, a sequence of tokens) to an MLlib Vector.
@@ -113,18 +113,10 @@ val tfidfUncommon = idf.transform(tfUncommon)
 val uncommonVector = tfidfUncommon.first.asInstanceOf[SV]
 println(uncommonVector.values.toSeq)
 
---------------------------
-
 import org.apache.spark.mllib.regression.LabeledPoint
 
-val zippedTain = trainSet.zip(tfidf)
-val train = zippedTain.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
-
-import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
-val numIterations = 100
-val model = LogisticRegressionWithSGD.train(train, numIterations)
-
---------------------------
+val zippedTrain = trainSet.zip(tfidf)
+val train = zippedTrain.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
 
 val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
 val testTfIdf = idf.transform(testTf)
@@ -132,12 +124,52 @@ val testTfIdf = idf.transform(testTf)
 val zippedTest = testSet.zip(testTfIdf)
 val test = zippedTest.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
 
+---- MLlib logistic regression --------------
+
+import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
+val numIterations = 100
+val model = LogisticRegressionWithSGD.train(train, numIterations)
+
 val validPredicts =  test.map(p => (model.predict(p.features),p.label))
+
+validPredicts.take(20)
+res9: Array[(Double, Double)] = Array((0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,1.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (1.0,0.0))
+
+import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
+val metrics = new BinaryClassificationMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 154
+validPredicts.count                            // 198
+model.getClass.getSimpleName
+metrics.areaUnderPR   //  0.7484455462506676
+metrics.areaUnderROC  //  0.7772787588037156
+
+---- MLlib SVM regression --------------
+
+import org.apache.spark.mllib.classification.SVMWithSGD
+val numIterations = 100
+val model = SVMWithSGD.train(train, numIterations)
+
+val validPredicts = test.map(x => (model.predict(x.features),x.label))
 
 import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
 val metrics = new BinaryClassificationMetrics(validPredicts)
 validPredicts.filter(x => x._1 == x._2).count  // 155
-validPredicts.count                            // 214
+validPredicts.count                            // 198
 model.getClass.getSimpleName
-metrics.areaUnderPR   //  0.6725438060540231
-metrics.areaUnderROC  //  0.7253385757972913
+metrics.areaUnderPR   // 0.7600385296261585
+metrics.areaUnderROC  // 0.7820251097274676
+
+---- MLlib Maive Bayes regression --------------
+
+import org.apache.spark.mllib.classification.NaiveBayes
+val model = NaiveBayes.train(train)
+
+val validPredicts = test.map(x => (model.predict(x.features),x.label))
+
+import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
+val metrics = new BinaryClassificationMetrics(validPredicts)
+validPredicts.filter(x => x._1 == x._2).count  // 144
+validPredicts.count                            // 198
+model.getClass.getSimpleName
+metrics.areaUnderPR   //  0.6893955497154562
+metrics.areaUnderROC  //  0.7271613759314076
