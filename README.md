@@ -3,7 +3,7 @@ sentiment analysis using TFIDF using MLlib and ML
 
 # Purpose: 
 - uae TF-IDF data processing and feature extraction for relevant words
-- use statements dataset to train different classification regression models from MLlib and ML.
+- use tweets dataset to train different classification regression models from MLlib and ML.
 - use trained model to identify which ones have a better performance.
 		 
 # Requirements: 
