@@ -117,12 +117,14 @@ import org.apache.spark.mllib.regression.LabeledPoint
 
 val zippedTrain = trainSet.zip(tfidf)
 val train = zippedTrain.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
+train.cache
 
 val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
 val testTfIdf = idf.transform(testTf)
 
 val zippedTest = testSet.zip(testTfIdf)
 val test = zippedTest.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
+test.cache
 
 ---- MLlib logistic regression --------------
 
