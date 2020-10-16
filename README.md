@@ -1,7 +1,7 @@
 # sentiment_analysis_using_TFIDF
 sentiment analysis using TFIDF using MLlib and ML
-- Source : Kaggle Dataset
-- URL : https://www.kaggle.com/marklvl/sentiment-labelled-sentences-data-set?
+- Source : UCI Machine Learning Repository
+- URL : https://archive.ics.uci.edu/ml/datasets/Sentiment+Labelled+Sentences
 
 # Purpose: 
 - uae TF-IDF data processing and feature extraction for relevant words
