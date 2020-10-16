@@ -1,4 +1,3 @@
-
 val rdd = sc.textFile("movie/imdb_labelled.txt").map(x => x.split("\\t"))
 
 -- remove nonword characters (such as punctuation).
@@ -54,12 +53,7 @@ def tokenize(line: String): Seq[String] = {
 rdd.flatMap(x => tokenize(x(0))).distinct.count
 res27: Long = 1161
 
-val sets = rdd.randomSplit(Array(0.8,0.2))
-val trainSet = sets(0)
-val testSet = sets(1)
-
-val tokens = trainSet.map(x => tokenize(x(0)))
-tokens.first.take(20)
+val tokens = rdd.map(x => tokenize(x(0)))
 
 ---------------------------
 
@@ -74,12 +68,6 @@ val hashingTF = new HashingTF(dim)
 val tf = hashingTF.transform(tokens)
 tf.cache
 
-val v = tf.first.asInstanceOf[SV]
-v.size
-v.values.size
-println(v.values.take(10).toSeq)
-println(v.indices.take(10).toSeq)
-
 -- compute the inverse document frequency for each term in the corpus
 -- by creating a new IDF instance and calling fit with our RDD of term frequency
 -- vectors as the input. We will then transform our term frequency vectors to TF-IDF
@@ -87,72 +75,43 @@ println(v.indices.take(10).toSeq)
 
 val idf = new IDF().fit(tf)
 val tfidf = idf.transform(tf)
-val v2 = tfidf.first.asInstanceOf[SV]
-println(v2.values.size)
-println(v2.values.take(10).toSeq)
-println(v2.indices.take(10).toSeq)
 
 ---------------------
 
-import org.apache.spark.mllib.regression.LabeledPoint
+-- Intuitively, we might expect two documents to be more similar to each other if they
+-- share many terms. Conversely, we might expect two documents to be less similar
+-- if they each contain many terms that are different from each other. As we compute
+-- cosine similarity by computing a dot product of the two vectors and each vector
+-- is made up of the terms in each document, we can see that documents with a high
+-- overlap of terms will tend to have a higher cosine similarity.
 
-val zippedTrain = trainSet.zip(tfidf)
-val train = zippedTrain.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
-train.cache
+val keywords = sc.parallelize(Seq(Seq("audience","characters","science")))
+val tfkeywords = hashingTF.transform(keywords)
+val tfidfkeywords = idf.transform(tfkeywords)
+val keywordVector = tfidfkeywords.first.asInstanceOf[SV]
 
-val testTf = testSet.map(x => hashingTF.transform(tokenize(x(0))))
-val testTfIdf = idf.transform(testTf)
+import breeze.linalg._
+val keywordSV = new SparseVector(keywordVector.indices, keywordVector.values, keywordVector.size)
 
-val zippedTest = testSet.zip(testTfIdf)
-val test = zippedTest.map{ case(text,vector) => LabeledPoint(text(1).toDouble,vector) }
-test.cache
+val cosineSim = rdd.map( x => {
+   val tfaux = hashingTF.transform(tokenize(x(0)))
+   val tfidfaux = idf.transform(tfaux)
+   val auxVector = tfidfaux.asInstanceOf[SV]
+   val auxSV = new SparseVector(auxVector.indices, auxVector.values, auxVector.size)
+   val cosineSim = auxSV.dot(keywordSV) / ( norm(auxSV)*norm(keywordSV) )
+   (x(0),cosineSim)
+ })
 
----- MLlib logistic regression --------------
 
-import org.apache.spark.mllib.classification.LogisticRegressionWithSGD
-val numIterations = 100
-val model = LogisticRegressionWithSGD.train(train, numIterations)
+val orderingDescDocs = Ordering.by[(String, Double), Double](_._2)
 
-val validPredicts =  test.map(p => (model.predict(p.features),p.label))
-
-validPredicts.take(20)
-res9: Array[(Double, Double)] = Array((0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,0.0), (1.0,0.0), (0.0,0.0), (0.0,1.0), (0.0,0.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (0.0,0.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (1.0,1.0), (0.0,0.0), (0.0,0.0), (1.0,0.0))
-
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-val metrics = new BinaryClassificationMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 154
-validPredicts.count                            // 198
-model.getClass.getSimpleName
-metrics.areaUnderPR   //  0.7484455462506676
-metrics.areaUnderROC  //  0.7772787588037156
-
----- MLlib SVM regression --------------
-
-import org.apache.spark.mllib.classification.SVMWithSGD
-val numIterations = 100
-val model = SVMWithSGD.train(train, numIterations)
-
-val validPredicts = test.map(x => (model.predict(x.features),x.label))
-
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-val metrics = new BinaryClassificationMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 155
-validPredicts.count                            // 198
-model.getClass.getSimpleName
-metrics.areaUnderPR   // 0.7600385296261585
-metrics.areaUnderROC  // 0.7820251097274676
-
----- MLlib Maive Bayes regression --------------
-
-import org.apache.spark.mllib.classification.NaiveBayes
-val model = NaiveBayes.train(train)
-
-val validPredicts = test.map(x => (model.predict(x.features),x.label))
-
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-val metrics = new BinaryClassificationMetrics(validPredicts)
-validPredicts.filter(x => x._1 == x._2).count  // 144
-validPredicts.count                            // 198
-model.getClass.getSimpleName
-metrics.areaUnderPR   //  0.6893955497154562
-metrics.areaUnderROC  //  0.7271613759314076
+cosineSim.top(20)(orderingDescDocs).mkString("\n")
+res6: String =
+(It's this pandering to the audience that sabotages most of his films.  ,0.41500939539147585)
+(Anne Heche was utterly convincing.  ,0.38393341547218474)
+(What this film lacks is a convincing script.  ,0.37846215662630767)
+(The entire audience applauded at the conclusion of the film.  ,0.3520167510910978)
+(Not sure who was more lost - the flat characters or the audience, nearly half of whom walked out.  ,0.297966455956392)
+(Both actors truly understand and become their particular character, delivering a convincing, sincere performance.  ,0.22959119908727826)
+(It's as continuously beautiful to look at as a Bertolucci, but the relationships here are more convincing and the narrative more engaging than some of that master's work.  ,0.21329365112295245)
+(All the characters in ...
