@@ -1,6 +1,5 @@
-https://archive.ics.uci.edu/ml/datasets/Sentiment+Labelled+Sentences
 
-val lines = sc.textFile("imdb_labelled.txt")
+val lines = sc.textFile("movie/imdb_labelled.txt")
 
 val columns = lines.map{_.split("\\t")}
 
