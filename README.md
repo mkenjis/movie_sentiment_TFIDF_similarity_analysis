@@ -1,4 +1,4 @@
-# sentiment_analysis_using_TFIDF
+# movie_sentiment_TFIDF_similarity_analysis
 sentiment analysis using TFIDF using MLlib and ML
 - Source : UCI Machine Learning Repository
 - URL : https://archive.ics.uci.edu/ml/datasets/Sentiment+Labelled+Sentences
