@@ -1,0 +1,94 @@
+https://archive.ics.uci.edu/ml/datasets/Sentiment+Labelled+Sentences
+
+val lines = sc.textFile("imdb_labelled.txt")
+
+lines.persist()
+
+lines.count()
+
+As the first step in the featuring engineering process, let’s split the text and label for each review. a review text and label are separated by the tab character
+
+val columns = lines.map{_.split("\\t")}
+
+Unlike MLlib, which operates on an RDD, Spark ML operates on a DataFrame. So let’s create a DataFrame.
+
+import spark.sqlContext.implicits._
+case class Review(text: String, label: Double)
+val reviews = columns.map{a => Review(a(0),a(1).toDouble)}.toDF()
+
+To evaluate the quality or performance of a trained model, we will need a test dataset. Therefore, let’s
+reserve a portion of the dataset for model testing.
+
+val Array(trainingData, testData) = reviews.randomSplit(Array(0.8, 0.2))
+trainingData.count
+testData.count
+
+The data is yet not in a format that can be used with a machine learning algorithm. We need to create a
+feature Vector for each sentence in the dataset. Spark ML provides Transformers to help with this task.
+
+import org.apache.spark.ml.feature.Tokenizer
+val tokenizer = new Tokenizer().setInputCol("text").setOutputCol("words")
+
+The tokenizer created here takes as input a DataFrame, which should have
+a column labeled "text", and outputs a new DataFrame, which will have all the columns in the input
+DataFrame and a new column labeled "words". For each sentence in the "text" column, the "words"
+column stores the words in an array
+
+val tokenizedData = tokenizer.transform(trainingData)
+
+Next, let’s create a feature Vector to represent a sentence. 
+
+import org.apache.spark.ml.feature.HashingTF
+val hashingTF = new HashingTF().setNumFeatures(1000).setInputCol(tokenizer.getOutputCol).setOutputCol("features")
+
+HashingTF is a Transformer that converts a sequence of words into a fixed-length feature Vector. It maps
+a sequence of terms to their term frequencies using a hashing function
+
+For this example, we will use the LogisticRegression class provided by the Spark ML library. It is available under the org.apache.spark.
+ml.classification package. 
+
+import org.apache.spark.ml.classification.LogisticRegression
+val lr = new LogisticRegression().setMaxIter(10).setRegParam(0.01)
+
+
+This code creates an instance of the LogisticRegression class and sets the maximum number of iterations and regularization parameter. Here we are trying to guess the best values for the maximum number of iterations and regularization parameter, which are the hyperparameters for the Logistic
+regression algorithm. 
+
+Now we have all the parts that we need to assemble a machine learning pipeline.
+
+import org.apache.spark.ml.Pipeline
+val pipeline = new Pipeline().setStages(Array(tokenizer, hashingTF, lr))
+
+This code creates an instance of the Pipeline class with three stages. The first two stages are
+Transformers and third stage is an Estimator.
+
+The pipeline object will first use the specified Transformers to transform a DataFrame containing raw data into a DataFrame with the feature Vectors. Finally, it will use the specified Estimator to train or fit a model on the training dataset.
+Now we are ready to train a model.
+
+val pipeLineModel = pipeline.fit(trainingData)
+
+
+Let’s evaluate how the generated model performs on both the training and test dataset. To do this, we
+first get the predictions for each observation in the training and test dataset.
+
+val testPredictions = pipeLineModel.transform(testData)
+
+val trainingPredictions = pipeLineModel.transform(trainingData)
+
+Note that the transform method of the pipeLineModel object created a DataFrame with three additional columns: rawPrediction, probability, and prediction.
+
+We will use a binary classifier evaluator to evaluate our model. It expects two input columns: rawPrediction and label.
+
+import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
+val evaluator = new BinaryClassificationEvaluator()
+
+Let’s now evaluate our model using Area under ROC as a metric. 
+
+import org.apache.spark.ml.param.ParamMap
+val evaluatorParamMap = ParamMap(evaluator.metricName -> "areaUnderROC")
+
+val aucTraining = evaluator.evaluate(trainingPredictions, evaluatorParamMap)
+
+val aucTest = evaluator.evaluate(testPredictions, evaluatorParamMap)
+
+
